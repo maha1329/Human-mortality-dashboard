@@ -1,0 +1,627 @@
+library(shiny)
+library(shinydashboard)
+library(graphics)
+library(DT)
+library(rgl)
+library(rainbow)
+library(demography)
+library(zoo)
+library(qvcalc)
+library(relimp)
+library(spam)
+library(maps)
+library(gnm)
+library(rootSolve)
+library(fanplot)
+library(fields)
+library(StMoMo)
+library(fitdistrplus)
+library(survival)
+library(npsurv)
+library(lsei)
+linebreaks <- function(n){HTML(strrep(br(), n))}
+#QUESTION 2 CALL FUNCTION
+cohort <- function(year, rates, log=FALSE)
+{
+  xg <- diag(rates[, colnames(rates) >= year])
+  names(xg) <- paste(year, rownames(rates)[1:length(xg)], sep="-x=")
+  if(log)
+    xg <- log(xg)
+  xg
+}
+
+
+ui<- dashboardPage(
+  
+  dashboardHeader(title=" Homme francais"),
+  dashboardSidebar(
+    sidebarMenu(
+      menuItem("Database",tabName="data",icon=icon("database")),
+      menuItem("Estimation et intervalle de confiance",tabName="estimation",icon=icon("calculator")),
+      menuItem("le modele de Lee-Carter ",tabName="leecarter",icon=icon("chart-bar")),
+      menuItem("la projection centrale",tabName="PC",icon=icon("money-bill-wave")),
+      menuItem(" les log taux de mortalites historiques et projetes pour la cohortes 1950",tabName="H",icon=icon("history")),
+      menuItem("Calculer la VAP du contrat",tabName="VAP",icon=icon("file-contract"))
+      
+    )
+  ),
+  dashboardBody(
+    tabItems(
+      tabItem("data",
+              fluidPage(
+                 h1(" Taux de mortalite pour les hommes francais nees en 1950"),
+                 dataTableOutput("datatable"),
+                 fluidRow(
+                   column(4,
+                 plotOutput("FranceH")),
+                 column(2,offset = 1),
+                 column(4,offset = 1,
+                        imageOutput("myImage")
+                 )
+                 )
+               )
+              ),
+      tabItem("estimation",
+              fluidPage(
+                h1(" Hommes francais nes en 1950 ayant contractes un contrat en 2000 "),
+                fluidRow(
+                  column(5,
+                         imageOutput("homContrat")),
+                  column(5,offset = 1,
+                         imageOutput("comp"))
+                ),
+                linebreaks(5),
+                h1("les intervalles de confiance au seuil de 99%"),
+                imageOutput("confiance")
+                
+                
+                
+              )
+           ),
+      tabItem("leecarter",
+              imageOutput("lc"),
+              linebreaks(5),
+              imageOutput("x"),
+              linebreaks(5),
+              h1("Parametre ax"),
+              imageOutput("ax"),
+              linebreaks(5),
+              h1("Parametre bx"),
+              imageOutput("bx"),
+              linebreaks(5),
+              h1("Ecart absolu des coefficients"),
+              imageOutput("ecart"),
+              linebreaks(5),
+              h1("Parametre kt"),
+              imageOutput("kt"),
+              linebreaks(5),
+              h1("Etude residuelle"),
+              imageOutput("res"),
+              linebreaks(5),
+              h1("En utilisant la fonction fit du package StMoMo"),
+              imageOutput("stmomo")
+              
+              
+               ),
+      tabItem("PC",
+              h1(" la projection centrale (moyenne) sur 20 ans"),
+              imageOutput("pc"),
+              linebreaks(5),
+              imageOutput("pc2"),
+              h4(" La projection centrale est une estimation moyenne sur 20 ans des taux de mortalite. Cette quantite peut donner une idee sur la projection totale.
+    "),
+              linebreaks(5)
+              ),
+      tabItem("H",
+              h2("Affichage des log taux de mortalites historiques a partir de 2010 "),
+              imageOutput("hist")
+              ),
+      tabItem("VAP",
+        textOutput("value")
+      )
+
+    )
+  )
+)
+
+  
+
+
+
+server<- function(input,output){
+    output$correlation_plot <- renderPlot(
+      {
+       plot(iris$Sepal.Length, iris$Petal.Length) 
+      })
+    
+    #1 ere methode d'importation des donnees
+    
+          #France1<-hmd.mx(country ="FRACNP",username = "maha.fathallah@esprit.tn",password = "1621372029",label = "France")
+          #head(France1)
+   
+    #2 eme methode d'importation des donnees localement
+  
+    donnee= read.table(file="mx.txt",header=TRUE,fill=TRUE)
+    x=data.matrix(donnee[,1])
+    y=data.matrix(donnee[,2])
+    z=data.matrix(donnee[,4])
+    dffff<- data.frame(Year=x,Age=y,Male=z)
+    summary(dffff)
+    
+    output$datatable <- renderDataTable(dffff)
+    France1 <- read.demogdata(file="data/Mx_1x1.txt",popfile="data/Exposures_1x1.txt",type="mortality", label="France")
+   
+    output$FranceH<- renderPlot(
+      {
+        par(mfrow=c(1,2))
+        Fr_years = c(1950:2000)
+        plot(France1,series="male",years=Fr_years,datatype="rate",  main="France, Homme, 1876 - 2018",xlab="Age",ylab="Taux (log)")
+        
+        legend("bottomright",legend=unique(France1$year),col=rainbow(length(France1$year)*1.25), ncol=5, pch=3, title="Year", cex=0.6 )
+        
+      },
+      height = 400, width = 800 
+    ) 
+    output$myImage <- renderImage({
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      # Generate the PNG
+      png(outfile, width = 400, height = 400)
+      plot(France1,series="male",years=Fr_years,datatype="rate", plot.type="time", main="France, Homme, 1950 - 2000",xlab="Annees",ylab="Taux (log)")
+      dev.off()
+      
+      # Return a list containing the filename
+      list(src = outfile,
+           contentType = 'image/png',
+           width = 400,
+           height = 400,
+           alt = "This is alternate text")
+    }, deleteFile = TRUE)
+    
+    #Graphe du QUESTION 2
+    output$homContrat <- renderImage({
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      # Generate the PNG
+      png(outfile, width = 400, height = 400)
+      colfunc <- colorRampPalette(c("red", "blue"))
+      
+      plot(cohort(1950, France1$rate$male, log=T),
+           col=colfunc(length(1950)), 
+           type="l",
+           ylim=c(-11,5),
+           main="France: Cohortes",
+           xlab = "age", 
+           ylab = "Taux de Mortalite")
+      dev.off()
+      
+      # Return a list containing the filename
+      list(src = outfile,
+           contentType = 'image/png',
+           width = 600,
+           height = 400,
+           alt = "This is alternate text")
+    }, deleteFile = TRUE)
+    
+    output$comp <- renderImage({
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      # Generate the PNG
+      png(outfile, width = 400, height = 400)
+      cohort1950_m <- cohort(1950, France1$rate$male)
+      
+      plot(France1$age, log(France1$rate$male[,"1950"]), main ='log mortality rates (FR_male, 1950)',
+           xlab = "Ages x", ylab = "log mortality rates", type = "l")
+      
+      lines(0:(length(cohort1950_m)-1), log(cohort1950_m), main ='male log mortality rates (FR, 1950)',
+            xlab = "Ages x", ylab = "log mortality rates", type = "l",col='red')
+      
+      legend(-4, -0.5,legend = c("lecture longitudinale", "lecture cohorte"),
+             col=c("black","red"),lty = 1, cex=0.7,
+             box.lty = 0
+      )
+      dev.off()
+      
+      # Return a list containing the filename
+      list(src = outfile,
+           contentType = 'image/png',
+           width = 600,
+           height = 400,
+           alt = "This is alternate text")
+    }, deleteFile = TRUE)
+    
+    
+    #Partie intervalle de confiance
+    
+    fit.norm<-fitdist(cohort(1950, France1$rate$total, log=T), "norm" )
+    fit.norm$estimate
+    
+    #NB : Niveau de con???ance de 99% ===> z(alpha/2)=2.576
+    ect = fit.norm$estimate["sd"]
+    moy_emp = fit.norm$estimate["mean"]
+    IC_inf = moy_emp-2.576*ect/sqrt(2)
+    IC_sup = moy_emp+2.576*ect/sqrt(2)
+    
+    
+    output$confiance <- renderImage({
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      # Generate the PNG
+      png(outfile, width = 400, height = 400)
+      cohort1950_m <- cohort(1950, France1$rate$male)
+      
+      plot(cohort(1950, France1$rate$male, log=T),
+           col=colfunc(length(1950)), 
+           type="l",
+           ylim=c(-11,5),
+           main="FR: Cohorte ",
+           xlab = "age", 
+           ylab = "Taux de Mortalite")
+      
+      abline(h=moy_emp,col="blue", lwd=3, lty=2)
+      abline(h=IC_inf,col="green", lwd=3, lty=2)
+      abline(h=IC_sup,col="green", lwd=3, lty=2)
+      dev.off()
+      
+      # Return a list containing the filename
+      list(src = outfile,
+           contentType = 'image/png',
+           width = 600,
+           height = 400,
+           alt = "This is alternate text")
+    }, deleteFile = TRUE)
+    
+    
+    #Question 3 avec lee carter comme vu au cours
+    output$lc <- renderImage({
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      # Generate the PNG
+      png(outfile, width = 400, height = 400)
+     
+      par(mfrow=c(1,1))
+      FR_ages = c(0,10,20,30,40,50,60,70,80,90,100)
+      
+      plot(France1,
+           series="total",
+           datatype="rate", 
+           plot.type="time",
+           age = FR_ages,
+           main="total male death rates (1950 - 2018) ",axes = F)
+      # on fixe les axes comme suit :
+      axis(side = 1, at=1816:2018)
+      axis(side = 2, at=-10:0)
+      legend(x="bottomright", legend = FR_ages,
+             col = rainbow(length(FR_ages)*1.25), lty = 1, cex=0.6,
+             box.lwd = 0.3)
+      
+      
+      dev.off()
+      
+      # Return a list containing the filename
+      list(src = outfile,
+           contentType = 'image/png',
+           width = 600,
+           height = 400,
+           alt = "This is alternate text")
+    }, deleteFile = TRUE)
+    
+ #choix du plage
+    
+    #plage d ages
+    ages.fit = 0:100
+    #periode de calibration
+    years.fit = 1950:2018
+    
+    # Lissage :
+    ## 1- Spline monotone :
+    France1_ls_m <- smooth.demogdata(France1,method="mspline")
+    ## 2- Spline standard :
+    France1_ls_s <- smooth.demogdata(France1, method="spline")
+    ## 3- Spline Concave :
+    France1_ls_c <- smooth.demogdata(France1, method="cspline")
+    ## 4- Spline localement quadratique :
+    France1_ls_q <- smooth.demogdata(France1, method="loess")
+    
+    output$x <- renderImage({
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      # Generate the PNG
+      png(outfile, width = 400, height = 400)
+      
+      # comparaison :
+      plot(France1, years=2000, type="p", pch=21, ylim=c(-12, -2), main="FR: MT 2000 - Lissage")
+      lines(France1_ls_m, years=2000, lty=1, col="blue")
+      lines(France1_ls_s, years=2000, lty=2, col="red")
+      lines(France1_ls_c, years=2000, lty=3, col="green")
+      lines(France1_ls_q, years=2000, lty=4, col="black")
+      legend("topleft",col=c("blue","red","green","black") ,lty=1:4, leg=c("mspline", "spline","cspline","loess"))
+      
+      
+      dev.off()
+      
+      # Return a list containing the filename
+      list(src = outfile,
+           contentType = 'image/png',
+           width = 600,
+           height = 400,
+           alt = "This is alternate text")
+    }, deleteFile = TRUE)
+   
+    
+    
+    # fitting Lee Carter model :
+    lca.total <- lca(France1_ls_m, series="total", adjust="dt",years =years.fit ,ages = ages.fit)
+    lca.male <- lca(France1_ls_m, series="male", adjust="dt",years =years.fit ,ages = ages.fit)
+    
+    output$ax <- renderImage({
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      # Generate the PNG
+      png(outfile, width = 400, height = 400)
+      
+      plot(lca.male$ax, main="Coef. ax sur donnees francaise", xlab="Age", ylab="ax", type="l")
+      lines(x=lca.male$age, y=lca.male$ax, main="ax", lty=2)
+      legend("bottomright","Male", cex=0.8,  lty=1:2)
+      
+      dev.off()
+      
+      # Return a list containing the filename
+      list(src = outfile,
+           contentType = 'image/png',
+           width = 600,
+           height = 400,
+           alt = "This is alternate text")
+    }, deleteFile = TRUE)
+    
+    
+    output$bx <- renderImage({
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      # Generate the PNG
+      png(outfile, width = 400, height = 400)
+      
+      plot(lca.male$bx, main="Coef. bx sur donnees francaise", ylim=c(0,0.03),xlab="Age", ylab="bx", type="l")
+      lines(x=lca.male$age, y=lca.male$bx, main="bx", lty=2)
+      legend("bottomright","Male", cex=0.8,  lty=1:2)
+      
+      dev.off()
+      
+      # Return a list containing the filename
+      list(src = outfile,
+           contentType = 'image/png',
+           width = 600,
+           height = 400,
+           alt = "This is alternate text")
+    }, deleteFile = TRUE)
+    
+    
+    output$ecart <- renderImage({
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      # Generate the PNG
+      png(outfile, width = 400, height = 400)
+      
+      plot(lca.total$ax-lca.male$ax, main="Ecart avec population totale", xlab="Age x", ylab=expression(paste(Delta, " ax")), type="l" , col='green')
+      lines(x=lca.male$age, y=lca.male$ax-lca.total$ax, main="delta", lty=2 , col ="blue")
+      legend("topright","Male", cex=0.8, lty=1:2)
+      
+      dev.off()
+      
+      # Return a list containing the filename
+      list(src = outfile,
+           contentType = 'image/png',
+           width = 600,
+           height = 400,
+           alt = "This is alternate text")
+    }, deleteFile = TRUE)
+    
+    
+    output$kt <- renderImage({
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      # Generate the PNG
+      png(outfile, width = 400, height = 400)
+      
+      plot(lca.total$kt, xlab="Year", main="Coef. kt sur donnees francaises",ylab="kt", type="l",ylim=c(-100, 100))
+      lines(lca.male$year, y=lca.male$kt, main="kt", lty=2 , col="blue")
+      legend("topright", "Male", cex=0.8, lty=1:2)
+      
+      dev.off()
+      
+      # Return a list containing the filename
+      list(src = outfile,
+           contentType = 'image/png',
+           width = 600,
+           height = 400,
+           alt = "This is alternate text")
+    }, deleteFile = TRUE)
+    
+    
+    output$res <- renderImage({
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      # Generate the PNG
+      png(outfile, width = 400, height = 400)
+      plot(lca.male$residuals)
+      
+      dev.off()
+      
+      # Return a list containing the filename
+      list(src = outfile,
+           contentType = 'image/png',
+           width = 600,
+           height = 400,
+           alt = "This is alternate text")
+    }, deleteFile = TRUE)
+    
+    
+    output$stmomo <- renderImage({
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      # Generate the PNG
+      png(outfile, width = 400, height = 400)
+      FR.stmomo.t<-StMoMoData(data=France1_ls_m ,series = "male",type="central")
+      #ajustement du model (fitiing) :
+      LC1 <- lc(link = "logit" )
+      LCfit1 <- fit(LC1, data = central2initial(FR.stmomo.t), ages.fit = ages.fit,  years.fit = years.fit)
+      # parametre kt :
+      plot(LCfit1$years,LCfit1$kt,type='l')
+      
+      dev.off()
+      
+      # Return a list containing the filename
+      list(src = outfile,
+           contentType = 'image/png',
+           width = 600,
+           height = 400,
+           alt = "This is alternate text")
+    }, deleteFile = TRUE)
+    
+    
+    
+    #Question 4 Centrage
+    output$pc <- renderImage({
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      # Generate the PNG
+      png(outfile, width = 600, height = 600)
+      FR.stmomo.t<-StMoMoData(data=France1_ls_m ,series = "male",type="central")
+      #ajustement du model (fitiing) :
+      
+      LC1 <- lc(link = "logit" )
+      LCfit1 <- fit(LC1, data = central2initial(FR.stmomo.t), ages.fit = ages.fit,  years.fit = years.fit)
+     
+      horizon=20
+      LCfor.t <- forecast(LCfit1, h = horizon)
+      plot(LCfor.t)
+      
+      rates.t<-cbind(France1$rate$male[0:100,],LCfor.t$rate[0:100,])
+      
+      
+      #plot(seq(min(France1$year),max(France1$year)+20),rates.t[60,],xlab="Years",ylab="Death Rates",type="l",main="Taux observes et projetes a un horizon de 20 ans pour x = 60 ans")
+      
+      #abline(v = 2017 , col="red" ,lwd=3, lty=2)
+      
+      
+      dev.off()
+      
+      # Return a list containing the filename
+      list(src = outfile,
+           contentType = 'image/png',
+           width = 600,
+           height = 400,
+           alt = "This is alternate text")
+         }, deleteFile = TRUE)
+    
+
+    output$pc2 <- renderImage({
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      # Generate the PNG
+      png(outfile, width = 600, height = 600)
+      FR.stmomo.t<-StMoMoData(data=France1_ls_m ,series = "male",type="central")
+      #ajustement du model (fitiing) :
+      
+      LC1 <- lc(link = "logit" )
+      LCfit1 <- fit(LC1, data = central2initial(FR.stmomo.t), ages.fit = ages.fit,  years.fit = years.fit)
+      
+      horizon=20
+      LCfor.t <- forecast(LCfit1, h = horizon)
+
+      rates.t<-cbind(France1$rate$male[0:100,],LCfor.t$rate[0:100,])
+      
+      
+      plot(seq(min(France1$year),max(France1$year)+20),rates.t[60,],xlab="Years",ylab="Death Rates",type="l",main="Taux observes et projetes a un horizon de 20 ans pour x = 60 ans")
+      
+      abline(v = 2017 , col="red" ,lwd=3, lty=2)
+      
+      
+      dev.off()
+      
+      # Return a list containing the filename
+      list(src = outfile,
+           contentType = 'image/png',
+           width = 600,
+           height = 400,
+           alt = "This is alternate text")
+    }, deleteFile = TRUE)
+    
+    # La projection centrale est une estimation moyenne sur 20 ans des taux de mortalite. Cette quantite peut donner une idee sur la projection totale.
+    
+    output$hist <- renderImage({
+      # A temp file to save the output.
+      # This file will be removed later by renderImage
+      outfile <- tempfile(fileext = '.png')
+      
+      # Generate the PNG
+      png(outfile, width = 600, height = 600)
+     
+      chosen_cohort=2010        #doit appartenir aux years de LCfit
+      plot(0:8, extractCohort(fitted(LCfit2, type = "rates"),
+                              cohort = chosen_cohort),
+           type = "l", log = "y", xlab = "age", ylab = "q(x)",
+           main = paste(c("Cohort",toString(chosen_cohort),"mortality rates"), collapse = " "),
+           xlim = c(0,103), ylim = c(0.000005, 0.007))
+      
+      #adding fitted projections
+      lines(9:28, extractCohort(LCfor.m$rates, cohort = chosen_cohort), # x = l'age suivant:max(years.fit)+h - chosen_cohort 
+            lty = 2, lwd=2, col="red")
+      
+      dev.off()
+      
+      # Return a list containing the filename
+      list(src = outfile,
+           contentType = 'image/png',
+           width = 600,
+           height = 400,
+           alt = "This is alternate text")
+    }, deleteFile = TRUE)
+    
+    library(lifecontingencies)
+    MaleFrance<-read.table(file="mltper_1x1.txt", header = TRUE,skip = 1, sep = "", dec = ".")
+    MaleFrance2000_2001<-MaleFrance[which(MaleFrance$Year == 2000),names(MaleFrance)]
+    df_m<-data.frame(MaleFrance2000_2001)
+    df_m$Age
+    x_num <- as.numeric(df_m$Age)
+    x_m=as.integer(x_num)
+    lx_m<-df_m$lx
+    
+    df<-data.frame(x_m,lx_m)
+    soa08Act=with(df_m, new("actuarialtable",x=x_m,lx=lx_m,name="France_male"))
+    #evaluate and life-long annuity for an aged 65
+    VAP=axn(soa08Act, x=60,n=30)
+    
+    
+    output$value <- renderText(VAP)
+}
+ 
+shinyApp(ui,server)
